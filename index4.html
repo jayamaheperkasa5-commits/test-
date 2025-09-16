@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Aplikasi Keuangan — Realtime (Firebase)</title>
+
+  <!-- Tailwind CDN (play) for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* small print styling and modal backdrop */
+    .modal-backdrop { background: rgba(0,0,0,0.45); }
+    @media print {
+      .no-print { display:none !important }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between gap-4 mb-6 no-print">
+      <div>
+        <h1 class="text-2xl font-bold">Aplikasi Keuangan</h1>
+        <p class="text-sm text-slate-500">Realtime — sinkron ke semua user (Firestore). Kategori: Beli Produk Mentah, Finishing, Transportasi, Gaji, Lain-lain.</p>
+      </div>
+      <div class="flex gap-2 items-center">
+        <button id="btnPrint" class="px-3 py-2 bg-white border rounded shadow-sm hover:bg-slate-100">Cetak</button>
+        <button id="btnRefresh" class="px-3 py-2 bg-white border rounded shadow-sm hover:bg-slate-100">Refresh</button>
+      </div>
+    </header>
+
+    <!-- Controls -->
+    <section class="bg-white rounded-lg shadow p-4 mb-6 no-print">
+      <div class="grid md:grid-cols-4 gap-3">
+        <div>
+          <label class="text-xs text-slate-500">Dari</label>
+          <input id="filterFrom" type="date" class="w-full mt-1 border rounded px-2 py-1" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">Sampai</label>
+          <input id="filterTo" type="date" class="w-full mt-1 border rounded px-2 py-1" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500">Cari (keterangan / kategori)</label>
+          <input id="filterKeyword" type="text" placeholder="ketik kata kunci..." class="w-full mt-1 border rounded px-2 py-1" />
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button id="btnAdd" class="px-4 py-2 bg-emerald-500 text-white rounded">Tambah Transaksi</button>
+        <button data-tab="SEMUA" class="tab-btn px-3 py-2 bg-white border rounded">Semua</button>
+        <button data-tab="Beli Produk Mentah" class="tab-btn px-3 py-2 bg-white border rounded">Beli Produk Mentah</button>
+        <button data-tab="Finishing" class="tab-btn px-3 py-2 bg-white border rounded">Finishing</button>
+        <button data-tab="Transportasi" class="tab-btn px-3 py-2 bg-white border rounded">Transportasi</button>
+        <button data-tab="Gaji" class="tab-btn px-3 py-2 bg-white border rounded">Gaji</button>
+        <button data-tab="Lain-lain" class="tab-btn px-3 py-2 bg-white border rounded">Lain-lain</button>
+        <button data-tab="RINGKASAN" class="tab-btn ml-auto px-3 py-2 bg-white border rounded">Ringkasan</button>
+      </div>
+    </section>
+
+    <!-- Main content: table / ringkasan -->
+    <main>
+      <!-- Table card -->
+      <div id="cardTable" class="bg-white rounded-lg shadow p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-lg">Daftar Transaksi</h2>
+          <div class="text-sm text-slate-500">Subtotal: <span id="subtotalView">Rp 0</span></div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-100">
+              <tr>
+                <th class="p-2 text-left">Tanggal</th>
+                <th class="p-2 text-left">Keterangan</th>
+                <th class="p-2">Jenis</th>
+                <th class="p-2">Kategori</th>
+                <th class="p-2 text-right">Qty</th>
+                <th class="p-2 text-right">Harga</th>
+                <th class="p-2 text-right">Total</th>
+                <th class="p-2">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="tbBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Ringkasan -->
+      <div id="cardSummary" class="hidden bg-white rounded-lg shadow p-4 mt-6">
+        <h2 class="font-semibold text-lg mb-3">Ringkasan & Diagram</h2>
+        <div class="grid md:grid-cols-3 gap-4">
+          <div class="p-4 border rounded">
+            <div class="text-sm text-slate-500">Total Pemasukan</div>
+            <div id="sumIncome" class="text-2xl font-bold mt-2">Rp 0</div>
+          </div>
+          <div class="p-4 border rounded">
+            <div class="text-sm text-slate-500">Total Pengeluaran</div>
+            <div id="sumExpense" class="text-2xl font-bold mt-2">Rp 0</div>
+          </div>
+          <div class="p-4 border rounded">
+            <div class="text-sm text-slate-500">Laba Bersih</div>
+            <div id="sumNet" class="text-2xl font-bold mt-2">Rp 0</div>
+          </div>
+        </div>
+
+        <div class="mt-4 p-4 border rounded">
+          <div class="text-sm text-slate-600 mb-2">Distribusi Pengeluaran per Kategori</div>
+          <canvas id="pieChart" height="200"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <!-- Modal: add/edit -->
+    <div id="modal" class="hidden fixed inset-0 flex items-center justify-center modal-backdrop no-print">
+      <div class="bg-white rounded-lg shadow-lg w-full max-w-2xl mx-4">
+        <div class="flex items-center justify-between p-4 border-b">
+          <h3 id="modalTitle" class="font-semibold">Tambah Transaksi</h3>
+          <button id="modalClose" class="px-3 py-1 rounded bg-slate-100">Tutup</button>
+        </div>
+        <div class="p-4">
+          <div class="grid md:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-slate-500">Tanggal</label>
+              <input id="fTanggal" type="date" class="w-full border rounded px-2 py-1" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Jenis</label>
+              <select id="fJenis" class="w-full border rounded px-2 py-1">
+                <option value="Masuk">Masuk</option>
+                <option value="Keluar">Keluar</option>
+              </select>
+            </div>
+            <div class="md:col-span-2">
+              <label class="text-xs text-slate-500">Keterangan</label>
+              <input id="fKet" type="text" class="w-full border rounded px-2 py-1" placeholder="keterangan..." />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Kategori (jika Keluar)</label>
+              <select id="fKategori" class="w-full border rounded px-2 py-1">
+                <option value="">-</option>
+                <option>Beli Produk Mentah</option>
+                <option>Finishing</option>
+                <option>Transportasi</option>
+                <option>Gaji</option>
+                <option>Lain-lain</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Qty</label>
+              <input id="fQty" type="number" class="w-full border rounded px-2 py-1" placeholder="0" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Harga (Rp)</label>
+              <input id="fHarga" type="number" class="w-full border rounded px-2 py-1" placeholder="0" />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 mt-4">
+            <button id="saveBtn" class="px-4 py-2 bg-emerald-600 text-white rounded">Simpan</button>
+            <button id="delBtn" class="px-4 py-2 bg-red-600 text-white rounded hidden">Hapus</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Firebase (module) -->
+  <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import {
+      getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    // 🔹 Config kamu sudah dipasang di sini
+    const firebaseConfig = {
+      apiKey: "AIzaSyAyBR9IhaA4FKkxchq2I79o2vppqbUs8Kk",
+      authDomain: "aplikasi-keuangan-7c005.firebaseapp.com",
+      projectId: "aplikasi-keuangan-7c005",
+      storageBucket: "aplikasi-keuangan-7c005.firebasestorage.app",
+      messagingSenderId: "195304770763",
+      appId: "1:195304770763:web:37902fadefb6854d9ddf4e",
+      measurementId: "G-RZ7SPX6DEJ"
+    };
+
+  
+
+    // ---------- DOM refs ----------
+    const tbBody = document.getElementById("tbBody");
+    const subtotalView = document.getElementById("subtotalView");
+    const btnAdd = document.getElementById("btnAdd");
+    const modal = document.getElementById("modal");
+    const modalClose = document.getElementById("modalClose");
+    const modalTitle = document.getElementById("modalTitle");
+    const fTanggal = document.getElementById("fTanggal");
+    const fJenis = document.getElementById("fJenis");
+    const fKet = document.getElementById("fKet");
+    const fKategori = document.getElementById("fKategori");
+    const fQty = document.getElementById("fQty");
+    const fHarga = document.getElementById("fHarga");
+    const saveBtn = document.getElementById("saveBtn");
+    const delBtn = document.getElementById("delBtn");
+    const btnPrint = document.getElementById("btnPrint");
+    const btnRefresh = document.getElementById("btnRefresh");
+    const filterFrom = document.getElementById("filterFrom");
+    const filterTo = document.getElementById("filterTo");
+    const filterKeyword = document.getElementById("filterKeyword");
+    const tabButtons = document.querySelectorAll(".tab-btn");
+    const cardTable = document.getElementById("cardTable");
+    const cardSummary = document.getElementById("cardSummary");
+    const sumIncomeEl = document.getElementById("sumIncome");
+    const sumExpenseEl = document.getElementById("sumExpense");
+    const sumNetEl = document.getElementById("sumNet");
+    const pieCanvas = document.getElementById("pieChart");
+
+    // ---------- State ----------
+    let activeTab = "SEMUA";
+    let editingId = null; // doc id when editing
+    let transactions = []; // local cache from snapshot
+    let pieChart = null;
+
+    // ---------- Helpers ----------
+    const fmtRp = v => {
+      try { return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(v||0); } catch { return 'Rp 0'; }
+    };
+
+    function resetForm(){
+      fTanggal.value = ""; fJenis.value = "Masuk"; fKet.value = ""; fKategori.value = ""; fQty.value = ""; fHarga.value = "";
+      editingId = null; delBtn.classList.add("hidden"); modalTitle.innerText = "Tambah Transaksi";
+    }
+
+    function openModal(edit = null){
+      modal.classList.remove("hidden");
+      document.body.style.overflow = "hidden";
+      if(edit){
+        modalTitle.innerText = "Edit Transaksi";
+        fTanggal.value = edit.tanggal || "";
+        fJenis.value = edit.jenis || "Masuk";
+        fKet.value = edit.keterangan || "";
+        fKategori.value = edit.kategori || "";
+        fQty.value = edit.qty ?? "";
+        fHarga.value = edit.harga ?? "";
+        editingId = edit.id;
+        delBtn.classList.remove("hidden");
+      } else {
+        resetForm();
+      }
+    }
+
+    function closeModal(){
+      modal.classList.add("hidden");
+      document.body.style.overflow = "";
+      resetForm();
+    }
+
+    // ---------- Firestore listeners (realtime) ----------
+    const q = query(collection(db, "transaksi"), orderBy("createdAt","desc"));
+    onSnapshot(q, (snap) => {
+      transactions = [];
+      snap.forEach(d => {
+        transactions.push({ id: d.id, ...d.data() });
+      });
+      renderTable();
+      renderSummary();
+    });
+
+    // ---------- CRUD ----------
+    async function createTransaction(payload){
+      // payload: { tanggal, keterangan, jenis, kategori, qty, harga, total }
+      await addDoc(collection(db,"transaksi"), { ...payload, createdAt: serverTimestamp() });
+    }
+
+    async function updateTransaction(id, payload){
+      await updateDoc(doc(db,"transaksi",id), payload);
+    }
+
+    async function deleteTransaction(id){
+      if(!confirm("Hapus transaksi ini?")) return;
+      await deleteDoc(doc(db,"transaksi",id));
+    }
+
+    // ---------- Render functions ----------
+    function applyFilters(items){
+      const from = filterFrom.value ? new Date(filterFrom.value).getTime() : null;
+      const to = filterTo.value ? new Date(filterTo.value).getTime()+24*60*60*1000 -1 : null;
+      const kw = filterKeyword.value.trim().toLowerCase();
+
+      return items.filter(it => {
+        // filter tab category
+        if(activeTab !== "SEMUA" && activeTab !== "RINGKASAN"){
+          if((it.kategori||"") !== activeTab) return false;
+        }
+        // filter date
+        if(it.tanggal){
+          const t = new Date(it.tanggal).getTime();
+          if(from && t < from) return false;
+          if(to && t > to) return false;
+        }
+        // keyword
+        if(kw){
+          const hay = `${it.keterangan||''} ${it.kategori||''}`.toLowerCase();
+          if(!hay.includes(kw)) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderTable(){
+      // show table or summary depending on activeTab
+      if(activeTab === "RINGKASAN"){
+        cardTable.classList.add("hidden");
+        cardSummary.classList.remove("hidden");
+      } else {
+        cardTable.classList.remove("hidden");
+        cardSummary.classList.add("hidden");
+      }
+
+      const items = applyFilters(transactions);
+      tbBody.innerHTML = "";
+      let subtotal = 0;
+      items.forEach(it => {
+        const tr = document.createElement("tr");
+        const total = (Number(it.qty||0) * Number(it.harga||0)) || Number(it.total||0) || 0;
+        subtotal += total;
+        tr.innerHTML = `
+          <td class="p-2">${it.tanggal || ""}</td>
+          <td class="p-2">${escapeHtml(it.keterangan||"")}</td>
+          <td class="p-2 text-center">${it.jenis || ""}</td>
+          <td class="p-2 text-center">${it.kategori || ""}</td>
+          <td class="p-2 text-right">${it.qty ?? ""}</td>
+          <td class="p-2 text-right">${fmtRp(it.harga)}</td>
+          <td class="p-2 text-right">${fmtRp(total)}</td>
+          <td class="p-2 text-center">
+            <button data-id="${it.id}" class="edit-btn px-2 py-1 bg-yellow-400 rounded text-white text-xs">Edit</button>
+            <button data-id="${it.id}" class="del-btn px-2 py-1 bg-red-600 rounded text-white text-xs">Hapus</button>
+          </td>
+        `;
+        tbBody.appendChild(tr);
+      });
+      subtotalView.innerText = fmtRp(subtotal);
+
+      // attach handlers
+      document.querySelectorAll(".edit-btn").forEach(b => {
+        b.onclick = () => {
+          const id = b.dataset.id;
+          const item = transactions.find(x=>x.id===id);
+          if(!item) return;
+          openModal({
+            id: item.id,
+            tanggal: item.tanggal || "",
+            jenis: item.jenis || "Masuk",
+            keterangan: item.keterangan || "",
+            kategori: item.kategori || "",
+            qty: item.qty ?? "",
+            harga: item.harga ?? ""
+          });
+        };
+      });
+      document.querySelectorAll(".del-btn").forEach(b => {
+        b.onclick = async () => {
+          const id = b.dataset.id;
+          await deleteTransaction(id);
+        };
+      });
+    }
+
+    function renderSummary(){
+      // compute totals
+      let income = 0, expense = 0;
+      const catTotals = {
+        "Beli Produk Mentah":0,
+        "Finishing":0,
+        "Transportasi":0,
+        "Gaji":0,
+        "Lain-lain":0
+      };
+      transactions.forEach(it => {
+        const total = (Number(it.qty||0) * Number(it.harga||0)) || Number(it.total||0) || 0;
+        if(it.jenis === "Masuk") income += total;
+        else {
+          expense += total;
+          if(it.kategori && catTotals[it.kategori] !== undefined){
+            catTotals[it.kategori] += total;
+          }
+        }
+      });
+
+      sumIncomeEl.innerText = fmtRp(income);
+      sumExpenseEl.innerText = fmtRp(expense);
+      sumNetEl.innerText = fmtRp(income - expense);
+
+      // pie chart (expense by category)
+      const labels = Object.keys(catTotals);
+      const values = labels.map(l => catTotals[l]);
+      if(pieChart) pieChart.destroy();
+      pieChart = new Chart(pieCanvas.getContext('2d'), {
+        type: 'pie',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: ['#2563EB','#F97316','#10B981','#F59E0B','#8B5CF6']
+          }]
+        },
+        options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.label}: ${fmtRp(ctx.parsed)}`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // ---------- UI events ----------
+    btnAdd.onclick = () => openModal(null);
+    modalClose.onclick = closeModal;
+    btnPrint.onclick = () => window.print();
+    btnRefresh.onclick = () => { /* manual refresh triggers re-render */ renderTable(); renderSummary(); };
+
+    // save (create/update)
+    saveBtn.onclick = async () => {
+      const tanggal = fTanggal.value;
+      const jenis = fJenis.value;
+      const keterangan = fKet.value.trim();
+      const kategori = fKategori.value;
+      const qty = fQty.value ? Number(fQty.value) : 0;
+      const harga = fHarga.value ? Number(fHarga.value) : 0;
+      const total = qty * harga;
+
+      if(!tanggal || !keterangan){ alert("Isi tanggal dan keterangan minimal."); return; }
+
+      const payload = { tanggal, jenis, keterangan, kategori, qty, harga, total };
+      if(editingId){
+        await updateTransaction(editingId, payload);
+      } else {
+        await createTransaction(payload);
+      }
+      closeModal();
+    };
+
+    // delete from modal
+    delBtn.onclick = async () => {
+      if(!editingId) return;
+      if(confirm("Hapus transaksi ini?")){
+        await deleteTransaction(editingId);
+        closeModal();
+      }
+    };
+
+    // tab buttons
+    tabButtons.forEach(b => {
+      b.addEventListener("click", () => {
+        tabButtons.forEach(x=>x.classList.remove("bg-emerald-500","text-white"));
+        b.classList.add("bg-emerald-500","text-white");
+        activeTab = b.dataset.tab;
+        renderTable();
+        if(activeTab === "RINGKASAN") renderSummary();
+      });
+    });
+
+    // filters
+    [filterFrom, filterTo, filterKeyword].forEach(el => { el.addEventListener("input", () => renderTable()); });
+
+    // helpers
+    function escapeHtml(s){
+      if(!s) return "";
+      return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"','&quot;');
+    }
+
+    // ---------- initial setup ----------
+    // set default active tab style
+    document.querySelectorAll(".tab-btn").forEach(t => {
+      if(t.dataset.tab === "SEMUA") { t.classList.add("bg-emerald-500","text-white"); }
+    });
+
+    // done
+  </script>
+</body>
+</html>
